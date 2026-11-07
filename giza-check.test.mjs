@@ -16,7 +16,7 @@ function fakeGitHub({files = ['README.md'], auth = 'ok', meta = {}, metaStatus =
     const path = url.replace('https://api.github.com', '');
     if (/^\/repos\/[^/]+\/[^/]+$/.test(path)) return metaStatus === 200
       ? json({full_name: 'me/app', html_url: 'https://github.com/me/app', default_branch: 'main', pushed_at: new Date().toISOString(),
-        size: 10, permissions: authed ? {push: true} : {}, ...meta})
+        size: 10, permissions: authed && auth !== 'workflow' ? {push: true} : {}, ...meta})   // a workflow token reports no permissions
       : json(metaBody ?? {message: 'nope'}, metaStatus);
     if (path.includes('/git/trees/')) return json({tree: files.map(p => ({path: p, type: 'blob'})), truncated: false});
     if (path.includes('/actions/runs')) return json({workflow_runs: []});
@@ -87,4 +87,37 @@ test('bad input prints usage', async () => {
   const {code, out} = await run(['not a repo'], fakeGitHub());
   assert.equal(code, 1);
   assert.match(out, /Usage/);
+});
+
+test('inside its own GitHub Actions run, a live run proves control of the repo', async () => {
+  const gh = fakeGitHub({auth: 'workflow'});
+  const f = async (url, opts) => /\/actions\/runs\/42$/.test(url) ? json({status: 'in_progress'}) : gh.f(url, opts);
+  const env = {GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'me/app', GITHUB_RUN_ID: '42'};
+  Object.assign(process.env, env);
+  try {
+    const {out} = await run(['me/app', '--json'], {f}, {GITHUB_TOKEN: 'workflow-token'});
+    const master = JSON.parse(out).blocks.find(b => b.key === 'master');
+    assert.equal(master.state, 'verified');
+    assert.match(master.found, /own GitHub Actions run/);
+  } finally { for (const k of Object.keys(env)) delete process.env[k]; }
+});
+
+test('claiming to be in Actions does not help when the run is not real', async () => {
+  const env = {GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'me/app', GITHUB_RUN_ID: '42'};
+  Object.assign(process.env, env);
+  try {
+    const {out} = await run(['me/app', '--json'], fakeGitHub({auth: 'workflow'}), {GITHUB_TOKEN: 'workflow-token'});   // /actions/runs/42 is 404
+    assert.notEqual(JSON.parse(out).blocks.find(b => b.key === 'master').state, 'verified');
+  } finally { for (const k of Object.keys(env)) delete process.env[k]; }
+});
+
+test('a different repo than the one running the workflow gets no Actions credit', async () => {
+  const gh = fakeGitHub({auth: 'workflow'});
+  const f = async (url, opts) => /\/actions\/runs\/42$/.test(url) ? json({status: 'in_progress'}) : gh.f(url, opts);
+  const env = {GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: 'someone/else', GITHUB_RUN_ID: '42'};
+  Object.assign(process.env, env);
+  try {
+    const {out} = await run(['me/app', '--json'], {f}, {GITHUB_TOKEN: 'workflow-token'});
+    assert.notEqual(JSON.parse(out).blocks.find(b => b.key === 'master').state, 'verified');
+  } finally { for (const k of Object.keys(env)) delete process.env[k]; }
 });

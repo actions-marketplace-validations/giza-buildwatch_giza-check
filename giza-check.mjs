@@ -427,6 +427,14 @@ async function gatherEvidence(full, token, f = fetch, deadline = AbortSignal.tim
     access: perm.admin ? 'admin' : perm.push ? 'write' : 'read', fork: !!meta.fork, archived: !!meta.archived, empty: meta.size === 0,
     pushedAt: meta.pushed_at ?? null, branch: meta.default_branch ?? null, seen: false, truncated: false, secretFiles: [],
     has: {health: false, backup: false, monitor: false}, packages: [], runs: [], deployments: []};
+  // Running inside this repo's own GitHub Actions: the workflow token never reports permissions, but only someone
+  // who controls the repo can make a workflow run there. Confirm with GitHub that this run is real and still going.
+  const runId = process.env.GITHUB_RUN_ID ?? '';
+  if (ev.access === 'read' && process.env.GITHUB_ACTIONS === 'true' && /^\d{1,20}$/.test(runId)
+      && (process.env.GITHUB_REPOSITORY ?? '').toLowerCase() === full.toLowerCase()) {
+    const run = await get(`${base}/actions/runs/${runId}`);
+    if (run.status === 200 && run.json?.status && run.json.status !== 'completed') { ev.access = 'write'; ev.inOwnActions = true; }
+  }
   if (!ev.branch) return ev;
   const t = await get(`${base}/git/trees/${encodeURIComponent(ev.branch)}?recursive=1`);
   let tree = [];
@@ -497,6 +505,8 @@ async function main(argv = process.argv.slice(2), out = console.log, f = fetch, 
     // No safe address, or no answer: the live block can't turn green (Giza never assumes).
     const siteAnswers = prod ? (site ? await (opts.probe ?? probeSite)(site) : false) : null;
     const p = evaluateConnected(ev, {id: 'check', checkedAt: new Date().toISOString(), user: null, siteAnswers});
+    const master = p.blocks.find(b => b.id === 'check-master');
+    if (ev.inOwnActions && master) master.purpose = master.purpose.replace('You connected this repo through GitHub and can change it', 'Checked from inside this repo\'s own GitHub Actions run, which only its owners can start');
     const r = report(p, ev.full_name);
     out(argv.includes('--json') ? JSON.stringify(r, null, 2) : asText(r));
     if (ev.tokenRejected) console.error('Note: GitHub rejected the login token, so Giza checked as a visitor (public data only).');
