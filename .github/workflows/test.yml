@@ -1,0 +1,28 @@
+name: Test
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+  actions: read
+  deployments: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --test
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: giza
+        uses: ./
+        with:
+          strict: "true"
+      - name: The Action reports a number
+        run: test -n "${{ steps.giza.outputs.built }}" && echo "Giza built=${{ steps.giza.outputs.built }}"

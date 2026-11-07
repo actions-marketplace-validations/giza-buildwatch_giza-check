@@ -14,7 +14,7 @@ inputs:
     required: false
     default: ${{ github.token }}
   strict:
-    description: "Set to 'true' to fail the run unless all nine blocks are proven by Giza."
+    description: "Set to 'true' to fail the run when Giza finds a problem (for example a committed .env file)."
     required: false
     default: "false"
 outputs:

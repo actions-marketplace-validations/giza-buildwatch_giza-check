@@ -298,7 +298,7 @@ const lessons = {"app-looks":{"what":"The part you can see: screens, buttons, co
 // Giza check for AIs: run it on your own project before you tell your person anything is "done".
 //   node giza-check.mjs owner/repo            plain-text pyramid
 //   node giza-check.mjs owner/repo --json     the same, as JSON
-//   node giza-check.mjs owner/repo --strict   exit code 3 unless all nine blocks are proven
+//   node giza-check.mjs owner/repo --strict   exit code 3 if Giza found any problem (✗ PROBLEM)
 // It reads only GitHub's API (with GITHUB_TOKEN / GH_TOKEN, or `gh auth token`, if present, so private repos work)
 // and opens the project's own production address once to see that it answers. It sends nothing anywhere else:
 // no telemetry, no copy kept. The token is never printed. Scoring is the same code the Giza page uses.
@@ -400,7 +400,8 @@ async function readCapped(r, limit) {
 async function gatherEvidence(full, token, f = fetch, deadline = AbortSignal.timeout(90000)) {
   const headers = {accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28', 'user-agent': 'giza-check', ...(token ? {authorization: 'Bear' + `er ${token}`} : {})};
   const get = async (path, hop = 0) => {
-    const r = await f(API + path, {headers, redirect: 'manual', signal: AbortSignal.any([deadline, AbortSignal.timeout(15000)])});
+    const signal = AbortSignal.any ? AbortSignal.any([deadline, AbortSignal.timeout(15000)]) : AbortSignal.timeout(15000);   // AbortSignal.any: Node 18.17+/20.3+
+    const r = await f(API + path, {headers, redirect: 'manual', signal});
     if (r.status >= 300 && r.status < 400) {
       // GitHub moves renamed repos within its own API; anything else is refused, and the login never leaves api.github.com.
       const loc = r.headers.get('location') ?? '';
@@ -413,8 +414,13 @@ async function gatherEvidence(full, token, f = fetch, deadline = AbortSignal.tim
   };
   const [owner, name] = full.split('/'), base = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
   const m = await get(base);
+  if (m.status === 401 && token) return {...await gatherEvidence(full, null, f, deadline), tokenRejected: true};   // retry as a visitor
   if (m.status === 404) throw Error(token ? `GitHub can't find ${full}, or this token can't see it.` : `GitHub can't find ${full}. If it's private, set GITHUB_TOKEN (or log in with the gh tool) and run again.`);
-  if (m.status === 403 || m.status === 429) throw Error('GitHub is limiting checks right now. Set GITHUB_TOKEN for a higher limit, or try again in an hour.');
+  if (m.status === 401) throw Error('GitHub rejected the login token. Check GITHUB_TOKEN / GH_TOKEN, or unset it to check a public repo.');
+  if ((m.status === 403 || m.status === 429) && !/rate limit/i.test(m.json?.message ?? '') && m.status !== 429)
+    throw Error(`GitHub (or this network) refused access to ${full}: "${clean(m.json?.message ?? 'no reason given', 200)}"`);
+  if (m.status === 403 || m.status === 429) throw Error('GitHub is limiting checks right now. Set GITHUB_TOKEN for a higher limit, or try again in an hour.'
+    + (proxyEnv() && !process.env.NODE_USE_ENV_PROXY ? ' This network uses a proxy (HTTPS_PROXY), which needs Node 22.21+ or 24.5+ for Giza to go through it.' : ''));
   if (m.status !== 200) throw Error(`GitHub answered ${m.status} for ${full}.`);
   const meta = m.json ?? {}, perm = meta.permissions ?? {};
   const ev = {full_name: clean(meta.full_name ?? full, 140), url: /^https:\/\/github\.com\//.test(meta.html_url ?? '') ? meta.html_url : null, private: !!meta.private,
@@ -493,8 +499,22 @@ async function main(argv = process.argv.slice(2), out = console.log, f = fetch, 
     const p = evaluateConnected(ev, {id: 'check', checkedAt: new Date().toISOString(), user: null, siteAnswers});
     const r = report(p, ev.full_name);
     out(argv.includes('--json') ? JSON.stringify(r, null, 2) : asText(r));
-    return argv.includes('--strict') && r.built < r.total ? 3 : 0;
+    if (ev.tokenRejected) console.error('Note: GitHub rejected the login token, so Giza checked as a visitor (public data only).');
+    return argv.includes('--strict') && r.blocks.some(b => b.state === 'broken' || b.state === 'blocked') ? 3 : 0;
   } catch (x) { out(`Giza check could not finish: ${x.message}`); return 2; }
 }
 
-if (process.argv[1] && /check(-cli)?\.mjs$/.test(process.argv[1])) main().then(code => { process.exitCode = code; });
+function proxyEnv() { return process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || ''; }
+async function run() {
+  // Node's fetch skips HTTPS_PROXY unless NODE_USE_ENV_PROXY=1 is set when Node starts (Node 22.21+ / 24.5+).
+  // Many AI sandboxes only reach GitHub through that proxy, so restart once with it switched on.
+  if (proxyEnv() && !process.env.NODE_USE_ENV_PROXY && !process.env.GIZA_CHILD) {
+    const {spawnSync} = await import('node:child_process');
+    const c = spawnSync(process.execPath, ['--no-warnings', ...process.execArgv, process.argv[1], ...process.argv.slice(2)],
+      {stdio: 'inherit', env: {...process.env, NODE_USE_ENV_PROXY: '1', GIZA_CHILD: '1'}});
+    if (!c.error) { process.exitCode = c.status ?? 2; return; }
+  }
+  process.exitCode = await main();
+}
+if (process.argv[1] && /check(-cli)?\.mjs$/.test(process.argv[1])) run();
+export {main, gatherEvidence, report};

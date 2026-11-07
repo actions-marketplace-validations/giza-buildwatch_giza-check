@@ -35,7 +35,7 @@ jobs:
       - uses: giza-buildwatch/giza-check@v1
 ```
 
-The pyramid appears in the run's summary every time you push. Add `with: { strict: "true" }` to fail the run until all nine blocks are proven.
+The pyramid appears in the run's summary every time you push. Add `with: { strict: "true" }` to fail the run whenever Giza finds a problem (✗ PROBLEM), such as a committed `.env` file.
 
 **2. Let your AI check its own work** (Claude, ChatGPT, or any coding AI that can run commands)
 
@@ -63,9 +63,10 @@ Paste this to your AI:
 - **Your login stays with GitHub.** If a token is present (`GITHUB_TOKEN`, `GH_TOKEN`, or `gh auth token`), it's sent only to `api.github.com`, never printed, and never sent anywhere else. Redirects off GitHub are refused.
 - **Nothing is sent to us.** No telemetry, no copy kept.
 - **A hostile project can't trick it.** Text from the project is cleaned of hidden characters and labelled as data, not instructions. The one site visit refuses private, local and reserved network addresses, checked at the moment of connecting.
+- **Works inside AI sandboxes.** If the network uses a proxy (`HTTPS_PROXY`), Giza goes through it (Node 22.21+ or 24.5+). A login token GitHub rejects is dropped and the check carries on as a visitor.
 - **One file, no dependencies, Node 18+.** Read it before you run it: [`giza-check.mjs`](giza-check.mjs).
 
-Reviewed for security before release by an independent AI reviewer; every finding was fixed with a regression test.
+Reviewed for security before release by an independent AI reviewer. Regression tests: [`giza-check.test.mjs`](giza-check.test.mjs) (`node --test`), run on every push along with the Action itself.
 
 ## Honest limits
 
