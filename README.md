@@ -71,3 +71,7 @@ Reviewed for security before release by an independent AI reviewer. Regression t
 ## Honest limits
 
 It's a checklist, not a guarantee. Giza can only judge what it can see on GitHub and from outside your app. Some hosts don't report deploys to GitHub, so "People can reach it" may show as not checked even when your site is up.
+
+## License
+
+MIT. See [LICENSE](LICENSE). Free to use, copy and change; keep the copyright notice.
