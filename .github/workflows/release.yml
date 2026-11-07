@@ -1,0 +1,36 @@
+name: Release
+# One click: Actions tab -> Release -> Run workflow.
+# Runs the tests, tags this commit with the new version, and moves the major tag (v1)
+# so everyone using giza-check@v1 or the /v1/ download gets it.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New version, for example v1.1.0"
+        required: true
+        default: "v1.1.0"
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node --test
+      - name: Tag and move the major tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Version must look like v1.2.3"; exit 1; }
+          MAJOR="${VERSION%%.*}"
+          git tag "$VERSION"
+          git tag -f "$MAJOR"
+          git push origin "refs/tags/$VERSION"
+          git push -f origin "refs/tags/$MAJOR"
+          echo "Released $VERSION and moved $MAJOR to $(git rev-parse --short HEAD)" >> "$GITHUB_STEP_SUMMARY"
